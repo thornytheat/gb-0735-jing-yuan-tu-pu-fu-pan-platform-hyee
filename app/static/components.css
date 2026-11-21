@@ -43,6 +43,14 @@
 .evidence-note { color: var(--ink-3); font-size: 11px; margin-top: 3px; }
 .probe-form { display: grid; grid-template-columns: minmax(0, 1.8fr) repeat(2, minmax(0, 1fr)) auto; gap: 5px; align-items: end; margin-bottom: 8px; }
 .probe-form label { min-width: 0; display: grid; gap: 3px; color: var(--ink-3); font-size: 11px; }
+.dispatch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: var(--gap); padding: 5px 8px; background: var(--panel); border: 1px solid var(--line-2); }
+.dispatch-bar label { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 11px; }
+.dispatch-bar input { width: 66px; }
+.dispatch-blockers { margin-bottom: var(--gap); padding: 6px 8px; background: var(--panel); border: 1px solid var(--bad); }
+.dispatch-blockers p + p { margin-top: 4px; }
+.dispatch-summary { margin-bottom: var(--gap); }
+.dispatch-summary .pairs { grid-template-columns: minmax(84px, .5fr) minmax(0, 1.4fr); }
+.dispatch-export { margin-left: auto; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px; padding: 5px 7px; border-bottom: 1px solid var(--line); }
 .legend button { min-height: 22px; color: var(--ink-2); background: var(--panel); border: 1px solid transparent; border-radius: var(--radius); padding: 1px 5px; white-space: nowrap; font-size: 11px; }
 .legend button:hover, .legend button[aria-pressed="true"] { border-color: var(--line-2); background: var(--panel-2); }

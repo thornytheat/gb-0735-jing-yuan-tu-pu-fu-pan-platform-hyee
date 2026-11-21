@@ -14,6 +14,7 @@
 | M5 缺陷簇 | 检查四邻域成员、分档和原行 | `GET /api/runs/{run_id}/clusters/{wafer}` | `app/modules/clusters/components.py` | `tests/test_clusters.py` |
 | M6 良率勾稽 | 核对坐标集合、实收和交接差值 | `GET /api/runs/{run_id}/yield` | `app/modules/yield_audit/compare.py` | `tests/test_yield.py` |
 | M7 图批复盘 | 原子运行、按归档重算、核验后导出 | `POST /api/runs` `POST /api/runs/{run_id}/rerun` `GET /api/runs/{run_id}/export` | `app/modules/runs/pipeline.py` `app/modules/runs/service.py` `app/modules/runs/bundle.py` `app/store.py` | `tests/test_runs.py` |
+| M8 抽样派工 | 给四个复判位定芯粒、看片/带覆盖、发布与失效重算 | `GET/POST /api/runs/{run_id}/dispatch` `GET /api/runs/{run_id}/dispatch/{dispatch_id}` | `app/modules/dispatch/plan.py` `app/modules/dispatch/service.py` `app/store.py` | `tests/test_dispatch.py` |
 
 ## 陷阱登记
 
@@ -31,6 +32,9 @@
 | TRAP-17 | `probe-b.csv` 中文栏名且第二段换序 | 错对 X/Y 或分档 | 映射别名并按段绑定字段 | `app/modules/intake/reader.py` | `tests/test_intake.py::test_segment_headers_advance_reordered_contract` |
 | TRAP-18 | 空文件、空行与仅档头的构造输入 | 产生零行成功批次 | 三态分别返回错误码 | `app/modules/intake/reader.py` | `tests/test_intake.py::test_empty_header_and_blank_are_separate` |
 | TRAP-19 | `(0,1)` 多测次，2 号在 10 号之后到达 | 误选最后行或字典序最大值 | 取最大有效测次号 | `app/modules/retest/arbitrate.py` | `tests/test_retest.py::test_numeric_attempt_precedence_ignores_arrival_order` |
+| TRAP-20 | 四复判位、两片、多条带：均摊则关键带太薄，集中则另一片零证据 | 简单取前四个失败点或按片平分 | 每片保底一位，其余按带规模/分档/邻接轮转加权，同簇折减 | `app/modules/dispatch/plan.py` | `tests/test_dispatch.py::test_wafer_floor_guarantees_both_wafers_with_two_slots` |
+| TRAP-21 | 勾稽失衡或位次不足致某片零证据 | 仍发布并隐瞒缺口 | `PLAN_BLOCKED` 拒绝，旧单原样保留 | `app/modules/dispatch/service.py` | `tests/test_dispatch.py::test_audit_change_invalidates_and_blocks_publish_keeping_old_record` |
+| TRAP-22 | 同图批重复发布/重跑、上游簇或勾稽变动 | 新增第二份单或继续用过期单 | 单据键含图批与上游摘要，冲突只留一版，旧单转 `STALE` 且导出被拒 | `app/store.py` `app/modules/dispatch/service.py` | `tests/test_dispatch.py::test_same_run_republish_and_rerun_reuse_single_dispatch` `test_upstream_cluster_change_marks_old_dispatch_stale_and_recomputes` |
 
 补充反例包括经过 X 反射后重新推导缺口转角、圆形边缘等式包含、对角缺陷分簇、恢复点断开原失效带、平移阵列漏位以及同键并发只提交一次。
 

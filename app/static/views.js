@@ -7,6 +7,10 @@ export const labels = {
   EDGE_EXCLUSION: '边缘保留带', NOTCH_VOID: '缺口空位', OUTSIDE_DISC: '圆片外',
   OUT_OF_GRID: '超出阵列', MATCH: '一致', REVIEW: '台账有差异', DIFFERENCE: '有差异',
   MISSING_REFERENCE: '缺交接台账', UNBALANCED: '阵列或行数失衡',
+  CURRENT: '现行', STALE: '已失效', SUPERSEDED: '已被替代',
+  WAFER_FLOOR: '片保底', PRIORITY: '带优先',
+  AUDIT_UNBALANCED: '勾稽失衡', NO_CANDIDATES: '无失败芯粒', WAFER_UNCOVERED: '有片零证据',
+  CLUSTER_UNCOVERED: '有带未覆盖',
 };
 
 export function element(tag, value, className) {
@@ -33,7 +37,8 @@ export function pairs(items) {
 
 export function status(code) {
   const variant = {PASS:'pass', FAIL:'fail', CONFLICT:'conflict', PENDING:'pending', MATCH:'pass',
-    REVIEW:'pending', DIFFERENCE:'pending', UNBALANCED:'fail'}[code] ?? '';
+    REVIEW:'pending', DIFFERENCE:'pending', UNBALANCED:'fail', CURRENT:'pass', STALE:'fail',
+    SUPERSEDED:'pending', WAFER_UNCOVERED:'fail'}[code] ?? '';
   return element('span', labels[code] ?? code, `status ${variant}`);
 }
 
@@ -294,4 +299,116 @@ function runs({run, manifests}) {
   ]);
 }
 
-export const views = {intake, coordinates, retest, clusters, yield: auditView, runs};
+function dispatchView(context) {
+  const {api, base, run, signal} = context;
+  const capacity = q('#dispatch-capacity');
+  const publish = q('#dispatch-publish');
+  const exportLink = q('#dispatch-export');
+  const stateBadge = q('#dispatch-state');
+  const blockers = q('#dispatch-blockers');
+  let latest = null;
+
+  const endpoint = () => `${base}/dispatch?capacity=${encodeURIComponent(capacity.value || 4)}`;
+  const setState = (plan, published) => {
+    const label = published ? (published.state === 'CURRENT' ? '现行版本' : labels[published.state] ?? published.state)
+      : plan.publishable ? '未发布 · 可发布' : '不可发布';
+    stateBadge.textContent = label;
+    const variant = published?.state === 'CURRENT' ? 'pass' : plan.publishable ? 'pending' : 'fail';
+    stateBadge.className = `status ${variant}`;
+    publish.disabled = !plan.publishable;
+    publish.title = plan.publishable ? '' : plan.blockers.map((item) => item.message).join('；');
+    exportLink.hidden = !published;
+    if (published) exportLink.href = `${base}/dispatch/${published.dispatch_id}/export`;
+  };
+
+  const draw = (data) => {
+    latest = data;
+    const {plan, reasons, existing, history} = data;
+    setState(plan, existing);
+    blockers.hidden = plan.publishable;
+    blockers.replaceChildren(...plan.blockers.map((item) => element('p', `${item.code} · ${item.message}`, 'inline-error')));
+    const summary = q('#dispatch-summary');
+    const uncoveredNames = plan.uncovered_clusters.map((item) => `${item.wafer}/${item.id}`);
+    summary.replaceChildren(pairs([
+      ['复判位次', `${plan.filled} / ${plan.capacity}`],
+      ['分配依据', Object.entries(reasons).map(([code, qty]) => `${labels[code]} ${qty}`).join(' · ') || '—'],
+      ['片覆盖', plan.uncovered_wafers.length ? `有片零证据：${plan.uncovered_wafers.join('、')}` : '每片都有复判依据'],
+      ['缺陷带覆盖', `${plan.clusters.length - uncoveredNames.length} / ${plan.clusters.length}`],
+      ['未覆盖带', uncoveredNames.join('、') || '全部覆盖'],
+      ['提示', plan.warnings?.length ? plan.warnings.map((item) => labels[item.code] ?? item.code).join('、') : '无'],
+      ['上游摘要', plan.data_sha256.slice(0, 16)],
+    ]));
+
+    text('#dispatch-slots-total', `${plan.filled} / ${plan.capacity} 位${plan.unfilled ? ` · 空 ${plan.unfilled}` : ''}`);
+    table(q('#dispatch-slots'), plan.slots, [
+      ['位次', 'slot', 'num'], ['晶圆', 'wafer', 'mono'],
+      ['芯粒', (slot) => {
+        const link = element('a', vector([slot.x, slot.y]), 'row-link');
+        link.href = `/?${new URLSearchParams({run: run.run_id, wafer: slot.wafer, cluster: slot.cluster, x: slot.x, y: slot.y})}`;
+        return link;
+      }],
+      ['缺陷带', 'cluster', 'mono'], ['分档', 'bin', 'num'],
+      ['末次', 'attempt', 'num'],
+      ['测次链', (slot) => slot.history.map((step) => `T${step.attempt} ${labels[step.result]}`).join(' → ')],
+      ['依据', (slot) => `${labels[slot.basis]} · 优先级 ${slot.priority}`],
+    ], '暂无位次。');
+
+    table(q('#dispatch-wafers'), plan.wafers, [
+      ['晶圆', 'wafer', 'mono'], ['失败芯粒', 'failing', 'num'], ['缺陷带', 'clusters', 'num'],
+      ['位次', 'slots', 'num'], ['已覆盖带', (item) => item.covered_clusters.join(' ') || '—', 'mono'],
+      ['未覆盖带', (item) => item.uncovered_clusters.join(' ') || '—', 'mono'],
+      ['证据', (item) => item.covered ? status('MATCH') : status('WAFER_UNCOVERED')],
+    ]);
+
+    const uncovered = plan.clusters.filter((item) => !item.covered).length;
+    text('#dispatch-coverage', `${plan.clusters.length - uncovered} / ${plan.clusters.length} 带`);
+    table(q('#dispatch-clusters'), plan.clusters, [
+      ['晶圆', 'wafer', 'mono'], ['缺陷带', 'id', 'mono'], ['成员', 'size', 'num'],
+      ['分档', (item) => Object.entries(item.bins).map(([bin, qty]) => `${bin}×${qty}`).join(' · ')],
+      ['邻接待判', 'open_neighbors', 'num'], ['优先级', 'priority', 'num'],
+      ['覆盖', (item) => item.covered ? item.slots.map((slot) => `#${slot}`).join(' ') : '未覆盖'],
+    ]);
+
+    table(q('#dispatch-history'), history.map((item) => ({...item, size: item.plan.filled})), [
+      ['派工单', (item) => item.dispatch_id.slice(0, 12), 'mono'],
+      ['状态', (item) => status(item.state)],
+      ['位次', 'capacity', 'num'], ['已落位', 'size', 'num'],
+      ['生成 UTC', 'created_at', 'mono'],
+    ], '尚未发布派工单。');
+  };
+
+  const load = async () => {
+    feedbackFor(context, '正在重算派工单…');
+    try {
+      draw(await api(endpoint()));
+      feedbackFor(context, '派工单已按当前上游重算。');
+    } catch (error) {
+      if (!signal.aborted) failure(q('#dispatch-slots'), error);
+    }
+  };
+
+  q('#dispatch-preview').addEventListener('click', load, {signal});
+  capacity.addEventListener('change', load, {signal});
+  publish.addEventListener('click', async () => {
+    publish.disabled = true;
+    try {
+      const result = await api(`${base}/dispatch?capacity=${encodeURIComponent(capacity.value || 4)}`, {method: 'POST'});
+      feedbackFor(context, result.reused ? '相同图批与上游已发布同一派工单，未新增版本。' : '派工单已发布，旧版本转为已被替代。');
+      draw(await api(endpoint()));
+    } catch (error) {
+      feedbackFor(context, `发布失败：${error.message}。旧版派工单保留。`, true);
+      if (latest) setState(latest.plan, latest.existing);
+    }
+  }, {signal});
+  load();
+}
+
+function feedbackFor({signal}, message, error = false) {
+  if (signal.aborted) return;
+  const panel = q('#feedback');
+  panel.hidden = !message;
+  panel.classList.toggle('error', error);
+  panel.textContent = message ?? '';
+}
+
+export const views = {intake, coordinates, retest, clusters, yield: auditView, dispatch: dispatchView, runs};

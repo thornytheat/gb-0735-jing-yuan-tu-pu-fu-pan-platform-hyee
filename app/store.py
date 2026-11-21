@@ -27,6 +27,26 @@ class RunStore:
                     pinned TEXT NOT NULL
                 )
             """)
+            connection.execute("""
+                CREATE TABLE IF NOT EXISTS wafer_dispatches (
+                    dispatch_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    lot TEXT NOT NULL,
+                    capacity INTEGER NOT NULL,
+                    data_sha256 TEXT NOT NULL,
+                    plan_version INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    plan TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(wafer_dispatches)")}
+            if "lot" not in columns:
+                connection.execute("ALTER TABLE wafer_dispatches ADD COLUMN lot TEXT NOT NULL DEFAULT ''")
+            connection.execute("""
+                CREATE INDEX IF NOT EXISTS wafer_dispatches_by_lot
+                ON wafer_dispatches (lot, created_at)
+            """)
 
     def put(self, manifest, snapshot, pinned):
         with self.connect() as connection:
@@ -51,3 +71,56 @@ class RunStore:
         with self.connect() as connection:
             rows = connection.execute("SELECT manifest FROM wafer_runs ORDER BY rowid DESC").fetchall()
         return [json.loads(row[0]) for row in rows]
+
+    def publish_dispatch(self, dispatch_id, run_id, lot, capacity, data_sha256, plan_version, status, plan, created_at):
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT dispatch_id, run_id, lot, capacity, data_sha256, plan_version, status, plan, created_at"
+                " FROM wafer_dispatches WHERE dispatch_id = ?", (dispatch_id,)).fetchone()
+            created = row is None
+            if created:
+                connection.execute(
+                    "UPDATE wafer_dispatches SET status = 'SUPERSEDED'"
+                    " WHERE lot = ? AND status = 'PUBLISHED'", (lot,))
+                connection.execute(
+                    "INSERT INTO wafer_dispatches"
+                    " (dispatch_id, run_id, lot, capacity, data_sha256, plan_version, status, plan, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (dispatch_id, run_id, lot, capacity, data_sha256, plan_version, status,
+                     canonical(plan), created_at))
+            elif row[6] != "PUBLISHED":
+                # 同一内容的旧版被替代后又重新发布：复位该版，不新增第二份单据。
+                connection.execute(
+                    "UPDATE wafer_dispatches SET status = 'SUPERSEDED'"
+                    " WHERE lot = ? AND dispatch_id != ? AND status = 'PUBLISHED'", (lot, dispatch_id))
+                connection.execute("UPDATE wafer_dispatches SET status = ?, run_id = ? WHERE dispatch_id = ?",
+                                   (status, run_id, dispatch_id))
+            row = connection.execute(
+                "SELECT dispatch_id, run_id, lot, capacity, data_sha256, plan_version, status, plan, created_at"
+                " FROM wafer_dispatches WHERE dispatch_id = ?", (dispatch_id,)).fetchone()
+        return self._dispatch(row), created
+
+    def dispatches(self, lot):
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT dispatch_id, run_id, lot, capacity, data_sha256, plan_version, status, plan, created_at"
+                " FROM wafer_dispatches WHERE lot = ? ORDER BY created_at ASC, rowid ASC", (lot,)).fetchall()
+        return [self._dispatch(row) for row in rows]
+
+    def dispatch(self, lot, dispatch_id):
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT dispatch_id, run_id, lot, capacity, data_sha256, plan_version, status, plan, created_at"
+                " FROM wafer_dispatches WHERE lot = ? AND dispatch_id = ?", (lot, dispatch_id)).fetchone()
+        if row is None:
+            raise ReviewError("DISPATCH_NOT_FOUND", "派工单未找到", 404)
+        return self._dispatch(row)
+
+    @staticmethod
+    def _dispatch(row):
+        keys = ("dispatch_id", "run_id", "lot", "capacity", "data_sha256", "plan_version",
+                "status", "plan", "created_at")
+        record = dict(zip(keys, row))
+        record["plan"] = json.loads(record["plan"])
+        return record

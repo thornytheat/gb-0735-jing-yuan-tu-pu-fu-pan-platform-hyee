@@ -1,0 +1,30 @@
+<div class="dispatch-bar">
+  <label>复判位次 <input id="dispatch-capacity" type="number" value="4" min="1" max="32" step="1" aria-label="复判位次"></label>
+  <button id="dispatch-preview" class="btn" type="button">重算派工</button>
+  <button id="dispatch-publish" class="btn primary" type="button">发布派工单</button>
+  <a id="dispatch-export" class="btn link-btn" hidden>导出派工单<span aria-hidden="true"> ↓</span></a>
+  <span class="status" id="dispatch-state">未发布</span>
+</div>
+<div id="dispatch-blockers" class="dispatch-blockers" hidden></div>
+<section class="panel dispatch-summary">
+  <div class="panel__head"><h2>覆盖判定</h2></div>
+  <div class="panel__body" id="dispatch-summary"></div>
+</section>
+<div class="grid split">
+  <section class="panel">
+    <div class="panel__head"><div><h2>四个位次落点</h2><span class="panel__meta" id="dispatch-slots-total">—</span></div></div>
+    <div class="table-scroll tall" id="dispatch-slots"></div>
+  </section>
+  <section class="panel">
+    <div class="panel__head"><h2>片覆盖</h2></div>
+    <div class="table-scroll" id="dispatch-wafers"></div>
+  </section>
+</div>
+<section class="panel below">
+  <div class="panel__head"><div><h2>缺陷带覆盖</h2><span class="panel__meta" id="dispatch-coverage">—</span></div></div>
+  <div class="table-scroll tall" id="dispatch-clusters"></div>
+</section>
+<section class="panel below">
+  <div class="panel__head"><h2>派工单版本</h2></div>
+  <div class="table-scroll" id="dispatch-history"></div>
+</section>
